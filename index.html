@@ -206,6 +206,8 @@ svg{display:block}
 #emotes button{cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--txt);border-radius:7px;padding:6px 10px;font:600 12px Inter,sans-serif;backdrop-filter:blur(10px);text-align:left}
 #emotes button:active{transform:translateY(1px)}
 @media (max-width:640px){#emotes{top:auto;bottom:130px;right:10px}.code{font-size:44px}}
+.lite *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.lite .overlay{background:rgba(8,9,11,.82)}
 /* shop */
 .sh{font-size:11px;font-weight:600;letter-spacing:.12em;color:var(--mut);text-transform:uppercase;margin:18px 0 8px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
@@ -842,15 +844,21 @@ const courseOpen=t=>t==='mixed'||save.unl.includes(t)||starsAll()>=((THEME_INFO[
 function checkUnlocks(){let n=false;THEME_KEYS.forEach(t=>{if(!save.unl.includes(t)&&starsAll()>=THEME_INFO[t].need){save.unl.push(t);if(THEME_INFO[t].need>0){n=true;toastQ.push({n:THEME_INFO[t].name+' unlocked',r:0,course:true})}}});if(n){unlock('back9');showToast()}writeSave()}
 
 /* ============ THREE SETUP ============ */
-const renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+/* Graphics quality: starts high, and steps down on its own if the device can't keep up (Chromebooks especially). */
+const IS_CROS=/CrOS/.test(navigator.userAgent),DPR0=devicePixelRatio||1;
+const QUAL=[{dpr:2,sh:0,soft:1,blur:1},{dpr:1.5,sh:2048,soft:1,blur:1},{dpr:1.25,sh:1024,soft:1,blur:0},{dpr:1,sh:1024,soft:0,blur:0},{dpr:.85,sh:1024,soft:0,blur:0}];
+let QL=(()=>{const u=new URLSearchParams(location.search).get('q');if(u!=null&&!isNaN(+u))return clamp(+u,0,4);let v=NaN;try{v=+localStorage.getItem('hillerQ')}catch(e){}return isNaN(v)||localStorage.getItem('hillerQ')==null?(IS_CROS?2:0):clamp(v-1,IS_CROS?2:0,4)})();
+const renderer=new THREE.WebGLRenderer({antialias:!(IS_CROS&&DPR0>=1.4)&&QL<4,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(DPR0,QUAL[QL].dpr));
+if(!QUAL[QL].blur)document.documentElement.classList.add('lite');
 renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.0;
-renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=QUAL[QL].soft?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
 $('gl').appendChild(renderer.domElement);
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(45,1,.05,400);
-const MAXANI=renderer.capabilities.getMaxAnisotropy();
-const sun=new THREE.DirectionalLight(0xfff1dc,2.2);sun.castShadow=true;sun.shadow.mapSize.set(Math.min(screen.width,screen.height)>=700&&renderer.capabilities.maxTextureSize>=8192?4096:2048,Math.min(screen.width,screen.height)>=700&&renderer.capabilities.maxTextureSize>=8192?4096:2048);sun.shadow.bias=-.0004;sun.shadow.normalBias=.02;sun.shadow.radius=3;scene.add(sun);scene.add(sun.target);
+const MAXANI=Math.min(renderer.capabilities.getMaxAnisotropy(),QL>=2?4:16);
+const SH_BEST=Math.min(screen.width,screen.height)>=700&&renderer.capabilities.maxTextureSize>=8192?4096:2048;
+const sun=new THREE.DirectionalLight(0xfff1dc,2.2);sun.castShadow=true;{const z=QUAL[QL].sh||SH_BEST;sun.shadow.mapSize.set(z,z)};sun.shadow.bias=-.0004;sun.shadow.normalBias=.02;sun.shadow.radius=3;scene.add(sun);scene.add(sun.target);
 const hemi=new THREE.HemisphereLight(0xcfe3ff,0x52683a,.25);scene.add(hemi);
 // sun direction from the panorama (u=.6, elevation ~27deg)
 const SUN_DIR=new THREE.Vector3(Math.cos(.2*Math.PI)*Math.cos(.9),Math.sin(.9),Math.sin(.2*Math.PI)*Math.cos(.9)).normalize();
@@ -1214,7 +1222,7 @@ function setupHole(def,idx){
  timers=[];ai=null;job=null;swing=null;follow=null;drag=null;hideAim();putter.visible=false;timeScale=1;
 }
 function placeBall(p,x,z){p.ball={x,z,vx:0,vz:0,still:0,lipped:false,lastX:x,lastZ:z,restX:x,restZ:z,bounces:0,startD:0,inSand:false,pipeT:0,piped:false,hole:-9,ht:0,depth:0,gone:false};p.sank=p.wet=false;p.sinkT=-1;p.mesh.visible=true;p.mesh.userData.ball.quaternion.identity()}
-function loadHole(i){
+function loadHole(i){perf.wait=Math.max(perf.wait,3);perf.n=perf.sum=0;
  holeIdx=i;setupHole(CH[i],i);
  const np=players.length,sp=np>2?.15:.16;players.forEach((p,k)=>{const off=np>1?(k-(np-1)/2)*(np>2?sp:.32):0;placeBall(p,H.tee[0]+off,H.tee[1]+(np>2&&k%2?.12:0));p.strokes=0;p.done=false;p.capped=false});
  cur=0;if(np>1&&i>0){const t=players.map(totals);t.forEach((v,k)=>{if(v<t[cur])cur=k})}
@@ -1867,7 +1875,22 @@ function updPutter(){
  else if(follow&&gameT-follow.t<.45)setPutter(follow,follow.a,-Math.min(.13,(gameT-follow.t)*.9));
  else putter.visible=false;
 }
+const perf={t:0,n:0,sum:0,wait:5};
+function setQuality(l){
+ l=clamp(l,0,4);if(l===QL)return;const prevSoft=QUAL[QL].soft;QL=l;const q=QUAL[l];try{localStorage.setItem('hillerQ',l)}catch(e){}
+ renderer.setPixelRatio(Math.min(DPR0,q.dpr));resize();
+ const z=q.sh||SH_BEST;if(sun.shadow.mapSize.x!==z){sun.shadow.mapSize.set(z,z);if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null}}
+ if(q.soft!==prevSoft){renderer.shadowMap.type=q.soft?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;scene.traverse(o=>{if(o.material)[].concat(o.material).forEach(m=>m.needsUpdate=true)})}
+ document.documentElement.classList.toggle('lite',!q.blur)}
+function perfWatch(){
+ // Real frame times over ~2 seconds; if it stays under ~45 fps, drop one quality step.
+ const now=performance.now(),raw=perf.last?(now-perf.last)/1000:0;perf.last=now;
+ if(document.hidden||paused||state==='loading'||!raw){perf.n=perf.sum=0;return}
+ if(perf.wait>0){perf.wait-=Math.min(raw,1);return}
+ perf.sum+=Math.min(raw,.5);perf.n++;
+ if(perf.sum>2){const fps=perf.n/perf.sum;perf.n=perf.sum=0;if(fps<45&&QL<4){setQuality(QL+1);perf.wait=2.5}}}
 function animate(dt){
+ perfWatch();
  H.mills.forEach((m,i)=>{millMeshes[i].rotation.y=-(m.w*gameT)});
  H.sliders.forEach((s,i)=>{const sn=Math.sin(s.w*gameT+s.ph);sliderMeshes[i].position.set(s.x+s.ax*sn,hAt(s.x,s.z)+.1,s.z+s.az*sn)});
  H.bumpers.forEach((bp,i)=>{bp.hit=Math.max(0,bp.hit-dt);const k=1+Math.sin(bp.hit/.25*Math.PI)*.05;bumperMeshes[i].scale.set(k,1,k)});
